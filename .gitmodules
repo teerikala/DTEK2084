@@ -1,0 +1,3 @@
+[submodule "tello_ros2_humble_driver"]
+	path = tello_ros2_humble_driver
+	url = https://github.com/TIERS/tello_ros2_humble_driver
