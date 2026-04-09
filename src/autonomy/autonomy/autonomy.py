@@ -15,10 +15,8 @@ class Autonomy(Node):
         super().__init__('autonomy')
         self.subscription = self.create_subscription(Image, '/image_raw', self.image_callback, custom_qos)
         self.bridge = CvBridge()
-        self.cmd_pub = self.create_publisher(Twist, '/control', custom_qos)
         self.tello_client = self.create_client(TelloAction, '/tello_action')
         
-        self.timer = self.create_timer(0.1, self.control_loop)
         self.x_err = 0
         self.y_err = 0
         #self.n = 0
@@ -26,14 +24,24 @@ class Autonomy(Node):
         self.speed = 0.0
         self.frames_going_forward = 0
 
+        self.command_in_progress = False
+        
+        self.mission_state = 'TRACKING'
+
         self.tello_service_call('takeoff')
         
     def tello_service_call(self, command):
+    
+        if self.command_in_progress:
+            return
+        
         while not self.tello_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Service not available, waiting")
         
         self.req = TelloAction.Request()
         self.req.cmd = command
+        
+        self.command_in_progress = True
 
         self.future = self.tello_client.call_async(self.req)
         self.future.add_done_callback(self.tello_callback)
@@ -46,37 +54,44 @@ class Autonomy(Node):
             self.get_logger().info(f"Response: {response}")
         except Exception as e:
             self.get_logger().error(f"Service call failed: {e}")
-
-    def control_loop(self):
-        msg = Twist()
-        
-        msg.linear.x = self.speed
-        msg.linear.y = -0.005 * self.x_err
-        msg.linear.z = -0.005 * self.y_err
-
-        self.cmd_pub.publish(msg)
+        finally:
+            # Unlock the drone state once the command finishes
+            self.command_in_progress = False
+        # Check what to do next based on the mission state
+            if self.mission_state == 'PASSING_GATE':
+                self.get_logger().info("Gate pass complete. Initiating landing sequence.")
+                self.mission_state = 'LANDING'
+                self.tello_service_call('land')
+                
+            elif self.mission_state == 'LANDING':
+                self.get_logger().info("Mission Complete! Drone has landed.")
+                self.mission_state = 'DONE'
 
     def image_callback(self, msg):
-        # When enough good frames, go forward for ~30 sec, then land
+    
+        if self.mission_state != 'TRACKING':
+            return
+    
+        if self.command_in_progress:
+           return
+        
         if self.good_frames > 20:
-            if self.frames_going_forward < 1800:
-                self.speed = 0.005
-                self.frames_going_forward += 1
-            else:
-                self.frames_going_forward = 0
-                self.good_frames = 0
-                
-                self.tello_service_call('land')
-
-                return
+           self.get_logger().info("Target acquired! Pushing forward...")
+           self.mission_state = 'PASSING_GATE'
+           self.tello_service_call('forward 500')
+           self.good_frames = 0
+           return
 
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
         #cv2.imwrite(f"frame_{self.n}.png", image)
         #self.n += 1
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        lower_green = np.array([30, 45, 45])
+        lower_green = np.array([25, 35, 35])
         upper_green = np.array([90, 255, 255])
+        
+        #lower_green = np.array([30, 45, 45])
+        #upper_green = np.array([90, 255, 255])
 
         mask = cv2.inRange(hsv, lower_green, upper_green)
 
@@ -102,13 +117,13 @@ class Autonomy(Node):
             return
 
         frame_cx = image.shape[1] // 2
-        frame_cy = image.shape[0] // 2-250
+        frame_cy = image.shape[0] // 2 - 100
         
         cv2.circle(output, (frame_cx, frame_cy), 10, (255, 0, 0), -1)
 
         error_x = cx - frame_cx
         error_y = cy - frame_cy
-
+	
         cv2.circle(output, (cx, cy), 10, (0, 0, 255), -1)
         #cv2.drawContours(output, [box], 0, (0, 255, 0), 2)
         resized = output
@@ -118,8 +133,28 @@ class Autonomy(Node):
 
         self.x_err = error_x
         self.y_err = error_y
-
-        if error_x < 10 and error_y < 10:
+        
+        if error_x < -25:
+            distance = max(20, abs(int(error_x / 20 + 10)))
+            self.tello_service_call(f"left {distance}")
+            self.get_logger().info(f"Going left, error_x = {error_x}")
+            
+        elif error_x > 25:
+            distance = max(20, abs(int(error_x / 20 + 10)))
+            self.tello_service_call(f"right {distance}")
+            self.get_logger().info(f"Going right, error_x = {error_x}")
+            
+        if error_y < -25:
+            distance = max(20, abs(int(error_y / 20 + 10)))
+            self.tello_service_call(f"up {distance}")
+            self.get_logger().info(f"Going up, error_y = {error_y}")
+            
+        elif error_y > 25:
+            distance = max(20, abs(int(error_y / 20 + 10)))
+            self.tello_service_call(f"down {distance}")
+            self.get_logger().info(f"Going down, error_y = {error_y}")
+	
+        if abs(error_x) <= 25 and abs(error_y) <= 25:
             self.good_frames += 1
             self.get_logger().info(f"{self.good_frames} good frames")
         else:
