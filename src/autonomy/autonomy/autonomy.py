@@ -26,15 +26,19 @@ class Autonomy(Node):
         self.speed = 0.0
         self.frames_going_forward = 0
 
+        self.tello_service_call('takeoff')
+        
+    def tello_service_call(self, command):
         while not self.tello_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Service not available, waiting")
         
         self.req = TelloAction.Request()
-        self.req.cmd = 'takeoff'
+        self.req.cmd = command
 
         self.future = self.tello_client.call_async(self.req)
         self.future.add_done_callback(self.tello_callback)
-        self.get_logger().info("Takeoff")
+        self.get_logger().info(f"Gave command: {command}")
+ 
 
     def tello_callback(self, future):
         try:
@@ -61,11 +65,10 @@ class Autonomy(Node):
             else:
                 self.frames_going_forward = 0
                 self.good_frames = 0
+                
+                self.tello_service_call('land')
 
-                land_msg = Empty()
-                self.land_pub.publish(land_msg)
-                self.get_logger().info("Landing")
-            return
+                return
 
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
         #cv2.imwrite(f"frame_{self.n}.png", image)
