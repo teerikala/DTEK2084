@@ -7,6 +7,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+import time
 
 custom_qos = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=10, reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE)
 
@@ -15,7 +16,12 @@ class Autonomy(Node):
         super().__init__('autonomy')
         self.subscription = self.create_subscription(Image, '/image_raw', self.image_callback, custom_qos)
         self.bridge = CvBridge()
+        
+        # Service client for discrete commands (Takeoff, Land)
         self.tello_client = self.create_client(TelloAction, '/tello_action')
+        
+        # Publisher for /cmd_vel
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
         self.x_err = 0
         self.y_err = 0
@@ -57,29 +63,24 @@ class Autonomy(Node):
         finally:
             # Unlock the drone state once the command finishes
             self.command_in_progress = False
-        # Check what to do next based on the mission state
-            if self.mission_state == 'PASSING_GATE':
-                self.get_logger().info("Gate pass complete. Initiating landing sequence.")
-                self.mission_state = 'LANDING'
-                self.tello_service_call('land')
-                
-            elif self.mission_state == 'LANDING':
-                self.get_logger().info("Mission Complete! Drone has landed.")
-                self.mission_state = 'DONE'
 
     def image_callback(self, msg):
     
-        if self.mission_state != 'TRACKING':
-            return
-    
-        if self.command_in_progress:
+        if self.mission_state != 'TRACKING' or self.command_in_progress:
            return
         
-        if self.good_frames > 20:
+        if self.good_frames >= 20:
            self.get_logger().info("Target acquired! Pushing forward...")
+           
+           # Stopping before flying forward
+           stop_msg = Twist()
+           self.cmd_vel_pub.publish(stop_msg)
+                      
            self.mission_state = 'PASSING_GATE'
-           self.tello_service_call('forward 500')
+           self.tello_service_call('forward 300')
            self.good_frames = 0
+           time.sleep(5)
+           self.mission_state = 'TRACKING'
            return
 
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
@@ -87,7 +88,7 @@ class Autonomy(Node):
         #self.n += 1
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        lower_green = np.array([25, 35, 35])
+        lower_green = np.array([30, 40, 40])
         upper_green = np.array([90, 255, 255])
         
         #lower_green = np.array([30, 45, 45])
@@ -101,23 +102,28 @@ class Autonomy(Node):
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         output = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        #cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255, 0), 2)
-        #rect = cv2.minAreaRect(largest)
-        #box = cv2.boxPoints(rect)
-        #box = np.int32(box)
-
-        #(cx, cy) = rect[0]
-        #cx, cy = int(cx), int(cy)
+        
         M = cv2.moments(mask)
 
-        if M["m00"] != 0:
+        if cv2.countNonZero(mask) > 8000:
             cx = int(M["m10"] / M["m00"])
             cy = int(M["m01"] / M["m00"])
         else:
+            # If target is lost, rotate right
+            self.get_logger().info("Target lost! Searching right...")
+            
+            search_msg = Twist()
+            search_msg.angular.z = -0.3
+            self.cmd_vel_pub.publish(search_msg)
+            
+            self.good_frames = 0
+            
+            cv2.imshow("Rectangle", output)
+            cv2.waitKey(1)
             return
 
         frame_cx = image.shape[1] // 2
-        frame_cy = image.shape[0] // 2 - 100
+        frame_cy = image.shape[0] // 2 - 250
         
         cv2.circle(output, (frame_cx, frame_cy), 10, (255, 0, 0), -1)
 
@@ -134,39 +140,45 @@ class Autonomy(Node):
         self.x_err = error_x
         self.y_err = error_y
         
-        if error_x < -25:
-            distance = max(20, abs(int(error_x / 20 + 10)))
-            self.tello_service_call(f"left {distance}")
-            self.get_logger().info(f"Going left, error_x = {error_x}")
-            
-        elif error_x > 25:
-            distance = max(20, abs(int(error_x / 20 + 10)))
-            self.tello_service_call(f"right {distance}")
-            self.get_logger().info(f"Going right, error_x = {error_x}")
-            
-        if error_y < -25:
-            distance = max(20, abs(int(error_y / 20 + 10)))
-            self.tello_service_call(f"up {distance}")
-            self.get_logger().info(f"Going up, error_y = {error_y}")
-            
-        elif error_y > 25:
-            distance = max(20, abs(int(error_y / 20 + 10)))
-            self.tello_service_call(f"down {distance}")
-            self.get_logger().info(f"Going down, error_y = {error_y}")
-	
-        if abs(error_x) <= 25 and abs(error_y) <= 25:
+        if abs(error_x) <= 20 and abs(error_y) <= 20:
+            self.cmd_vel_pub.publish(Twist())
             self.good_frames += 1
-            self.get_logger().info(f"{self.good_frames} good frames")
+            self.get_logger().info(f"{self.good_frames}/20 good frames")
         else:
             self.good_frames = 0
-            self.get_logger().info("Bad frame, reset counter")
-
+            
+            Kp_r = 0.004
+            Kp_v = 0.005
+            
+            velocity_r = -float(error_x * Kp_r)
+            velocity_v = -float(error_y * Kp_v)
+            
+            max_speed = 0.5
+            velocity_r = max(-max_speed, min(max_speed, velocity_r))
+            velocity_v = max(-max_speed, min(max_speed, velocity_v))
+            
+            twist_msg = Twist()
+            twist_msg.angular.z = velocity_r
+            twist_msg.linear.z = velocity_v
+            
+            self.cmd_vel_pub.publish(twist_msg)
+            
+            self.get_logger().info(f"Tracking -> vel_r: {velocity_r:.2f}, vel_v: {velocity_v:.2f}")
+            
 def main(args=None):
     rclpy.init(args=args)
     autonomy = Autonomy()
-    rclpy.spin(autonomy)
-    autonomy.destroy_node()
-    rclpy.shutdown()
+    
+    try:
+        rclpy.spin(autonomy)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        #failsafe: stop drone on shutdown
+        failsafe_msg = Twist()
+        autonomy.cmd_vel_pub.publish(failsafe_msg)
+        autonomy.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
