@@ -29,6 +29,13 @@ class Autonomy(Node):
         self.good_frames = 0
         self.speed = 0.0
         self.frames_going_forward = 0
+        self.prev_cx = None
+        self.prev_cy = None
+
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        parameters = cv2.aruco.DetectorParameters()
+        self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+
 
         self.command_in_progress = False
         
@@ -75,10 +82,14 @@ class Autonomy(Node):
            # Stopping before flying forward
            stop_msg = Twist()
            self.cmd_vel_pub.publish(stop_msg)
-                      
+
            self.mission_state = 'PASSING_GATE'
            self.tello_service_call('forward 300')
+           
            self.good_frames = 0
+           if self.prev_cx and self.prev_cy:
+               self.prev_cx, self.prev_cy = None, None
+
            time.sleep(5)
            self.mission_state = 'TRACKING'
            return
@@ -86,45 +97,60 @@ class Autonomy(Node):
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
         #cv2.imwrite(f"frame_{self.n}.png", image)
         #self.n += 1
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
-        lower_green = np.array([30, 40, 40])
-        upper_green = np.array([90, 255, 255])
         
-        #lower_green = np.array([30, 45, 45])
-        #upper_green = np.array([90, 255, 255])
-
-        mask = cv2.inRange(hsv, lower_green, upper_green)
-
-        kernel = np.ones((25, 25), np.uint8)
-
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        output = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        corners, ids, rejected = self.detector.detectMarkers(gray)
+        if ids is not None:
+            for i in range(len(ids)):
+                if ids[i][0] == 4:
+                    cx, cy = np.mean(corners[i][0], axis=0)
+                    cx, cy = int(cx)+20, int(cy)-150
+                    self.prev_cx, self.prev_cy = cx, cy
         
-        M = cv2.moments(mask)
+        cx, cy = self.prev_cx, self.prev_cy
 
-        if cv2.countNonZero(mask) > 8000:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-        else:
-            # If target is lost, rotate right
-            self.get_logger().info("Target lost! Searching right...")
+        if not self.prev_cx and not self.prev_cy:
+
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+            lower_green = np.array([30, 40, 40])
+            upper_green = np.array([90, 255, 255])
             
-            search_msg = Twist()
-            search_msg.angular.z = -0.3
-            self.cmd_vel_pub.publish(search_msg)
+            #lower_green = np.array([30, 45, 45])
+            #upper_green = np.array([90, 255, 255])
+
+            mask = cv2.inRange(hsv, lower_green, upper_green)
+
+            kernel = np.ones((25, 25), np.uint8)
+
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            output = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
             
-            self.good_frames = 0
-            
-            cv2.imshow("Rectangle", output)
-            cv2.waitKey(1)
-            return
+            M = cv2.moments(mask)
+
+            if cv2.countNonZero(mask) > 8000:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+            else:
+                # If target is lost, rotate right
+                self.get_logger().info("Target lost! Searching right...")
+                
+                search_msg = Twist()
+                search_msg.angular.z = -0.3
+                self.cmd_vel_pub.publish(search_msg)
+                
+                self.good_frames = 0
+                
+                cv2.imshow("Rectangle", output)
+                cv2.waitKey(1)
+                return
 
         frame_cx = image.shape[1] // 2
         frame_cy = image.shape[0] // 2 - 250
         
+        output = image
         cv2.circle(output, (frame_cx, frame_cy), 10, (255, 0, 0), -1)
 
         error_x = cx - frame_cx
@@ -147,8 +173,12 @@ class Autonomy(Node):
         else:
             self.good_frames = 0
             
-            Kp_r = 0.004
-            Kp_v = 0.005
+            if self.prev_cx and self.prev_cy:
+                Kp_r = 0.0005
+                Kp_v = 0.0005
+            else:
+                Kp_r = 0.004
+                Kp_v = 0.005
             
             velocity_r = -float(error_x * Kp_r)
             velocity_v = -float(error_y * Kp_v)
