@@ -109,14 +109,14 @@ class Autonomy(Node):
 
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-            lower_green = np.array([30, 40, 40])
+            lower_green = np.array([37, 47, 47])
             upper_green = np.array([90, 255, 255])
             
             #lower_green = np.array([30, 45, 45])
             #upper_green = np.array([90, 255, 255])
 
             mask = cv2.inRange(hsv, lower_green, upper_green)
-
+	
             kernel = np.ones((25, 25), np.uint8)
 
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
