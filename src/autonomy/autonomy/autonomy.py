@@ -107,6 +107,23 @@ class Autonomy(Node):
 
         if not self.prev_cx and not self.prev_cy:
 
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+            lower_green = np.array([30, 40, 40])
+            upper_green = np.array([90, 255, 255])
+            
+            #lower_green = np.array([30, 45, 45])
+            #upper_green = np.array([90, 255, 255])
+
+            mask = cv2.inRange(hsv, lower_green, upper_green)
+
+            kernel = np.ones((25, 25), np.uint8)
+
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            output = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
             current_width = 0
