@@ -116,7 +116,23 @@ class Autonomy(Node):
             #upper_green = np.array([90, 255, 255])
 
             mask = cv2.inRange(hsv, lower_green, upper_green)
-	
+            
+            lower_red1 = np.array([0, 100, 100])
+            upper_red1 = np.array([10, 255, 255])
+
+            lower_red2 = np.array([170, 100, 100])
+            upper_red2 = np.array([179, 255, 255])
+
+            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+
+            red_mask = mask1 + mask2
+            red_count = cv2.countNonZero(red_mask)
+
+            if red_count > 2000:
+                self.command_in_progress = True
+                self.tello_service_call('land')
+
             kernel = np.ones((25, 25), np.uint8)
 
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -222,6 +238,8 @@ class Autonomy(Node):
                 self.good_frames = 0
                 time.sleep(4)
                 self.mission_state = 'TRACKING'
+                self.prev_cx = None
+                self.prev_cy = None
                 return
             
             
