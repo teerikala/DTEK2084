@@ -32,10 +32,8 @@ class Autonomy(Node):
         self.prev_cx = None
         self.prev_cy = None
 
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        parameters = cv2.aruco.DetectorParameters()
-        self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        self.parameters = cv2.aruco.DetectorParameters_create()
 
         self.command_in_progress = False
         
@@ -43,7 +41,7 @@ class Autonomy(Node):
         
         self.reset_timer = None
 
-        self.tello_service_call('takeoff')
+        #self.tello_service_call('takeoff')
         
     def tello_service_call(self, command):
     
@@ -97,7 +95,7 @@ class Autonomy(Node):
         #self.n += 1
         
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        corners, ids, rejected = self.detector.detectMarkers(gray)
+        corners, ids, rejected = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
         if ids is not None:
             for i in range(len(ids)):
                 if ids[i][0] == 4:
@@ -197,9 +195,9 @@ class Autonomy(Node):
         TARGET_WIDTH = 600
         
         # NOTE: Might crash to gate 2 !!!
-        if (current_width > (TARGET_WIDTH * 0.90) and abs(error_x) <= 30 and abs(error_y) <= 30) or if (self.prev_cx and self.prev_cy and abs(error_x) <= 20 and abs(error_y) <= 20):
+        if (current_width > (TARGET_WIDTH * 0.90) and abs(error_x) <= 30 and abs(error_y) <= 30) or (self.prev_cx and self.prev_cy and abs(error_x) <= 20 and abs(error_y) <= 20):
             self.good_frames += 1
-            if self.good_frames > 5:
+            if self.good_frames > 15:
                 self.get_logger().info("AT THE GATE! Pushing through...")
                 self.cmd_vel_pub.publish(Twist())
                 self.mission_state = 'PASSING_GATE'
