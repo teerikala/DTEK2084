@@ -32,6 +32,8 @@ class Autonomy(Node):
         self.prev_cx = None
         self.prev_cy = None
 
+        self.gate_counter = 0
+
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.parameters = cv2.aruco.DetectorParameters_create()
 
@@ -86,7 +88,7 @@ class Autonomy(Node):
             for i in range(len(ids)):
                 if ids[i][0] == 4:
                     cx, cy = np.mean(corners[i][0], axis=0)
-                    cx, cy = int(cx)+20, int(cy)-50
+                    cx, cy = int(cx)+30, int(cy)-50
                     self.prev_cx, self.prev_cy = cx, cy
         
         cx, cy = self.prev_cx, self.prev_cy
@@ -122,12 +124,11 @@ class Autonomy(Node):
             
             self.get_logger().info(f"Red pixels: {red_count}")
             
-            if red_count > 4000:
+            if red_count > 4000 or self.gate_counter == 4:
                 self.get_logger().info("Beginning landing sequence...")
-                self.cmd_vel_pub.publish(Twist())
-                self.command_in_progress = True
+                #self.cmd_vel_pub.publish(Twist())
                 self.tello_service_call('land')
-                time.sleep(3)
+                self.command_in_progress = True
                 return
 
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -202,19 +203,19 @@ class Autonomy(Node):
         
         TARGET_WIDTH = 600
         
-        # NOTE: Might crash to gate 2 !!!
         if (current_width > (TARGET_WIDTH * 0.90) and abs(error_x) <= 30 and abs(error_y) <= 30) or (self.prev_cx and self.prev_cy and abs(error_x) <= 25 and abs(error_y) <= 25):
             self.good_frames += 1
             if self.good_frames > 20:
                 self.get_logger().info("AT THE GATE! Pushing through...")
                 self.cmd_vel_pub.publish(Twist())
                 self.mission_state = 'PASSING_GATE'
-                self.tello_service_call('forward 225')
+                self.tello_service_call('forward 230')
                 self.good_frames = 0
                 time.sleep(3)
                 self.mission_state = 'TRACKING'
                 self.prev_cx = None
                 self.prev_cy = None
+                self.gate_counter += 1
                 return
             
             
@@ -231,12 +232,11 @@ class Autonomy(Node):
             velocity_h = 0
             twist_msg = Twist()
 
-            # NOTE: Might crash to gate 2 !!!
             if self.prev_cx and self.prev_cy:
                 Kp_r = 0.0008
                 Kp_v = 0.003
             else:
-                Kp_r = 0.004 		# Rotational speed for adjusting towards green gates
+                Kp_r = 0.002 		# Rotational speed for adjusting towards green gates
                 Kp_v = 0.003 		# Vertical speed for adjusting towards green gates
                 Kp_depth = 0.001 	# Horizontal speed for adjusting towards green gates
             
