@@ -41,7 +41,7 @@ class Autonomy(Node):
         
         self.reset_timer = None
 
-        #self.tello_service_call('takeoff')
+        self.tello_service_call('takeoff')
         
     def tello_service_call(self, command):
     
@@ -75,20 +75,6 @@ class Autonomy(Node):
     
         if self.mission_state != 'TRACKING' or self.command_in_progress:
            return
-        
-        #if self.good_frames >= 20:
-           #self.get_logger().info("Target acquired! Pushing forward...")
-           
-           # Stopping before flying forward
-           #stop_msg = Twist()
-           #self.cmd_vel_pub.publish(stop_msg)
-                      
-           #self.mission_state = 'PASSING_GATE'
-           #self.tello_service_call('forward 300')
-           #self.good_frames = 0
-           #time.sleep(5)
-           #self.mission_state = 'TRACKING'
-           #return
 
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
         #cv2.imwrite(f"frame_{self.n}.png", image)
@@ -100,11 +86,14 @@ class Autonomy(Node):
             for i in range(len(ids)):
                 if ids[i][0] == 4:
                     cx, cy = np.mean(corners[i][0], axis=0)
-                    cx, cy = int(cx)+20, int(cy)-150
+                    cx, cy = int(cx)+20, int(cy)-50
                     self.prev_cx, self.prev_cy = cx, cy
         
         cx, cy = self.prev_cx, self.prev_cy
-
+        
+        current_width = 0
+        target_found = False
+        
         if not self.prev_cx and not self.prev_cy:
 
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -117,23 +106,29 @@ class Autonomy(Node):
 
             mask = cv2.inRange(hsv, lower_green, upper_green)
             
-            lower_red1 = np.array([0, 100, 100])
-            upper_red1 = np.array([10, 255, 255])
+            lower_red1 = np.array([0, 120, 100])
+            upper_red1 = np.array([1, 255, 255])
 
-            lower_red2 = np.array([170, 100, 100])
-            upper_red2 = np.array([179, 255, 255])
+            lower_red2 = np.array([170, 120, 100])
+            upper_red2 = np.array([180, 255, 255])
 
             mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
             mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
 
+            kernel = np.ones((25, 25), np.uint8)
+            
             red_mask = mask1 + mask2
             red_count = cv2.countNonZero(red_mask)
-
-            if red_count > 2000:
+            
+            self.get_logger().info(f"Red pixels: {red_count}")
+            
+            if red_count > 4000:
+                self.get_logger().info("Beginning landing sequence...")
+                self.cmd_vel_pub.publish(Twist())
                 self.command_in_progress = True
                 self.tello_service_call('land')
-
-            kernel = np.ones((25, 25), np.uint8)
+                time.sleep(3)
+                return
 
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
@@ -142,9 +137,6 @@ class Autonomy(Node):
 
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-            current_width = 0
-            target_found = False
-        
             valid_contours = []
             total_gate_area = 0
          
@@ -152,11 +144,11 @@ class Autonomy(Node):
                 for c in contours:
                     area = cv2.contourArea(c)
                     
-                    if area > 3000:
+                    if area > 2000: # <- how many pixels need to be in an area to be count towards the total area (this is for ignoring interference)
                         valid_contours.append(c)
                         total_gate_area += area
                         
-                if len(valid_contours) > 0 and total_gate_area > 7000:
+                if len(valid_contours) > 0 and total_gate_area > 5000: # <- how many pixels need to be in the total area to start adjusting position and aiming towards the area's middle point
                     target_found = True
                     
                     all_points = np.vstack(valid_contours)
@@ -173,14 +165,14 @@ class Autonomy(Node):
             if not target_found:
                 self.get_logger().info("Target lost or too small! Searching right...")
                 search_msg = Twist()
-                search_msg.angular.z = -0.3
+                search_msg.angular.z = -0.3 # The rotational speed to search gate
                 self.cmd_vel_pub.publish(search_msg)
                 
                 self.good_frames = 0
                 
                 # Show the video feed so the window updates while spinning
                 frame_cx = image.shape[1] // 2
-                frame_cy = image.shape[0] // 2 - 250
+                frame_cy = image.shape[0] // 2 - 100
                 cv2.circle(output, (frame_cx, frame_cy), 10, (255, 0, 0), -1)
                 cv2.imshow("Rectangle", output)
                 cv2.waitKey(1)
@@ -191,23 +183,6 @@ class Autonomy(Node):
             M = cv2.moments(mask)
             
             current_area = cv2.countNonZero(mask)
-
-            #if current_area > 8000:
-                #cx = int(M["m10"] / M["m00"])
-                #cy = int(M["m01"] / M["m00"])
-            #else:
-                # If target is lost, rotate right
-                #self.get_logger().info("Target lost! Searching right...")
-                
-                #search_msg = Twist()
-                #search_msg.angular.z = -0.3
-                #self.cmd_vel_pub.publish(search_msg)
-                
-                #self.good_frames = 0
-                
-                #cv2.imshow("Rectangle", output)
-                #cv2.waitKey(1)
-                #return
 
         frame_cx = image.shape[1] // 2
         frame_cy = image.shape[0] // 2 - 100
@@ -228,15 +203,15 @@ class Autonomy(Node):
         TARGET_WIDTH = 600
         
         # NOTE: Might crash to gate 2 !!!
-        if (current_width > (TARGET_WIDTH * 0.90) and abs(error_x) <= 30 and abs(error_y) <= 30) or (self.prev_cx and self.prev_cy and abs(error_x) <= 20 and abs(error_y) <= 20):
+        if (current_width > (TARGET_WIDTH * 0.90) and abs(error_x) <= 30 and abs(error_y) <= 30) or (self.prev_cx and self.prev_cy and abs(error_x) <= 25 and abs(error_y) <= 25):
             self.good_frames += 1
-            if self.good_frames > 15:
+            if self.good_frames > 20:
                 self.get_logger().info("AT THE GATE! Pushing through...")
                 self.cmd_vel_pub.publish(Twist())
                 self.mission_state = 'PASSING_GATE'
-                self.tello_service_call('forward 200')
+                self.tello_service_call('forward 225')
                 self.good_frames = 0
-                time.sleep(4)
+                time.sleep(3)
                 self.mission_state = 'TRACKING'
                 self.prev_cx = None
                 self.prev_cy = None
@@ -253,17 +228,17 @@ class Autonomy(Node):
             #self.get_logger().info(f"{self.good_frames}/20 good frames")
         else:
             self.good_frames = 0
-            
+            velocity_h = 0
             twist_msg = Twist()
 
             # NOTE: Might crash to gate 2 !!!
             if self.prev_cx and self.prev_cy:
-                Kp_r = 0.0005
-                Kp_v = 0.0005
+                Kp_r = 0.0008
+                Kp_v = 0.003
             else:
-                Kp_r = 0.004
-                Kp_v = 0.005
-                Kp_depth = 0.002
+                Kp_r = 0.004 		# Rotational speed for adjusting towards green gates
+                Kp_v = 0.003 		# Vertical speed for adjusting towards green gates
+                Kp_depth = 0.001 	# Horizontal speed for adjusting towards green gates
             
                 error_width = TARGET_WIDTH - current_width
                 velocity_h = float(error_width * Kp_depth)
@@ -285,7 +260,7 @@ class Autonomy(Node):
             
             self.cmd_vel_pub.publish(twist_msg)
             
-            self.get_logger().info(f"Width: {current_width} / {TARGET_WIDTH} | vel_h (fwd): {velocity_h:.2f}")
+            #self.get_logger().info(f"Width: {current_width} / {TARGET_WIDTH} | vel_h (fwd): {velocity_h:.2f}")
             
             #self.get_logger().info(f"Tracking -> vel_r: {velocity_r:.2f}, vel_v: {velocity_v:.2f}")
             
