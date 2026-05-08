@@ -100,10 +100,11 @@ class Autonomy(Node):
 
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-            lower_green = np.array([37, 47, 47])
+            #lower_green = np.array([37, 47, 47])
+            lower_green = np.array([35, 45, 40])
+            
             upper_green = np.array([90, 255, 255])
             
-            #lower_green = np.array([30, 45, 45])
             #upper_green = np.array([90, 255, 255])
 
             mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -166,7 +167,7 @@ class Autonomy(Node):
             if not target_found:
                 self.get_logger().info("Target lost or too small! Searching right...")
                 search_msg = Twist()
-                search_msg.angular.z = -0.3 # The rotational speed to search gate
+                search_msg.angular.z = -0.27 # The rotational speed to search gate
                 self.cmd_vel_pub.publish(search_msg)
                 
                 self.good_frames = 0

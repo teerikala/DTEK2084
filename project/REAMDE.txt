@@ -1,0 +1,5 @@
+Tässä uusi simulaatiopohja projektille. Jaettuna ympäristö ja sen visualisoiminen (env.py),
+robottien logiikka (robot.py) ja näiden alustaminen ja simulaation pyörittäminen (main.py).
+
+Käyttö ajamalla main.py:
+python3 main.py
