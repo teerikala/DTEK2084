@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge, Polygon
 import numpy as np
 
-
 def intersect_lines(p1, p2, p3, p4):
     x1, y1 = p1
     x2, y2 = p2
@@ -89,6 +88,17 @@ class Env():
         for i in range(n_robots*n_targets):
             self.wedge_info.append(None)
             self.wedges.append(None)
+    
+    def get_estimated_target(self):
+        """Returns the center of the current uncertainty area, if valid."""
+        if hasattr(self, 'area_patch') and self.area_patch is not None:
+            # Get the corners of the current intersection polygon
+            corners = self.area_patch.get_xy()
+            if len(corners) > 0:
+                mean_x = np.mean(corners[:, 0])
+                mean_y = np.mean(corners[:, 1])
+                return np.array([mean_x, mean_y])
+        return None    
     
     def tick(self):
         self.clock += 1
