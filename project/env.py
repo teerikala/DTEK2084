@@ -75,6 +75,11 @@ class Env():
                                              label='Robots', edgecolors='black', zorder=3)
         self.target_scatter = self.ax.scatter([], [], c='red', marker='x', s=100, 
                                               label='Targets', zorder=2)
+                                              
+        self.local_scatter = self.ax.scatter([], [], c='green', marker='.', s=50, 
+                                             label='Raw Sensor Guesses', alpha=0.5, zorder=4)
+        self.consensus_scatter = self.ax.scatter([], [], c='orange', marker='*', s=150, 
+                                                 label='Consensus State', edgecolors='black', zorder=5)
         
         self.ax.set_title("Environment")
         self.ax.set_xlim((-200, 200))
@@ -88,6 +93,13 @@ class Env():
         for i in range(n_robots*n_targets):
             self.wedge_info.append(None)
             self.wedges.append(None)
+    
+    def draw_beliefs(self, local_ests, consensus_ests):
+        """Updates the plot with the robots' internal calculations."""
+        if len(local_ests) > 0:
+            self.local_scatter.set_offsets(local_ests)
+        if len(consensus_ests) > 0:
+            self.consensus_scatter.set_offsets(consensus_ests)
     
     def get_estimated_target(self):
         """Returns the center of the current uncertainty area, if valid."""

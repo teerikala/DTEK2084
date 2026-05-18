@@ -20,12 +20,27 @@ def main():
 
     try:
         while True:
-            # First, move all robots
+            # Phase 1: All robots take their local sensor readings
+            for robot in robots:
+                robot.get_sensor_reading()
+            
+            # Phase 2: All robots exchange data and run Consensus Math
+            for robot in robots:
+                robot.communicate_and_consensus(robots)
+                
+            # Phase 3: All robots update their physical positions
             for robot in robots:
                 robot.step()
-        
+            
+            # Extract beliefs for visualization
+            local_ests = [robot.local_measurement for robot in robots if robot.local_measurement is not None]
+            consensus_ests = [robot.consensus_state for robot in robots if robot.consensus_state is not None]
+            
+            env.draw_beliefs(local_ests, consensus_ests)
+            
             # Update the environment and visuals
             env.tick()
+            
     except KeyboardInterrupt:
         print("Simulation stopped.")
         plt.close()
