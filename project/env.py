@@ -18,6 +18,21 @@ def intersect_lines(p1, p2, p3, p4):
 
     return np.array([px, py])
 
+def segments_intersect(p1, p2, p3, p4):
+    """Returns True if segment p1-p2 crosses segment p3-p4."""
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    d1 = cross(p3, p4, p1)
+    d2 = cross(p3, p4, p2)
+    d3 = cross(p1, p2, p3)
+    d4 = cross(p1, p2, p4)
+
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
+       ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+    return False
+
 def calculate_area(points):
     if len(points) < 3:
         return 0.0
@@ -58,9 +73,10 @@ def angle_of_arrival(sender_pos, receiver_pos):
     return np.degrees(estimated_angle - 2.0*max_noise), np.degrees(estimated_angle + 2.0*max_noise)
 
 class Env():
-    def __init__(self, robot_pos=[], target_pos=[]):
+    def __init__(self, robot_pos=[], target_pos=[], obstacles=[]):
         self.robot_pos = robot_pos
         self.target_pos = target_pos
+        self.obstacles = obstacles  # list of ((x1,y1),(x2,y2)) wall segments
         
         n_robots = len(self.robot_pos)
         n_targets = len(self.target_pos)
@@ -93,6 +109,13 @@ class Env():
         for i in range(n_robots*n_targets):
             self.wedge_info.append(None)
             self.wedges.append(None)
+
+    def los_blocked(self, pos_a, pos_b):
+        """Returns True if any obstacle blocks line of sight between pos_a and pos_b."""
+        for seg in self.obstacles:
+            if segments_intersect(tuple(pos_a), tuple(pos_b), seg[0], seg[1]):
+                return True
+        return False
     
     def draw_beliefs(self, local_ests, consensus_ests):
         """Updates the plot with the robots' internal calculations."""
@@ -122,9 +145,12 @@ class Env():
         i = 0
         for t_pos in self.target_pos:
             for r_pos in self.robot_pos:
-                s = signal_strenght(t_pos, r_pos)
-                t1, t2 = angle_of_arrival(t_pos, r_pos)
-                self.wedge_info[i] = [r_pos, t1, t2]
+                if self.los_blocked(r_pos, t_pos):  # suppress wedge when wall blocks signal
+                    self.wedge_info[i] = None
+                else:
+                    s = signal_strenght(t_pos, r_pos)
+                    t1, t2 = angle_of_arrival(t_pos, r_pos)
+                    self.wedge_info[i] = [r_pos, t1, t2]
                 
                 i += 1
 
@@ -151,6 +177,7 @@ class Env():
         for i in range(len(self.wedges)):
             if self.wedges[i]:
                 self.wedges[i].remove()
+                self.wedges[i] = None 
 
             if not self.wedge_info[i]:
                 continue
@@ -227,8 +254,17 @@ class Env():
             self.area_patch.remove()
             del self.area_patch
 
+        # Draw obstacles, redrawing each tick to stay on top of patches
+        if hasattr(self, 'obstacle_lines'):
+            for line in self.obstacle_lines:
+                line.remove()
+        self.obstacle_lines = []
+        for seg in self.obstacles:
+            line, = self.ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]],
+                                 color='black', linewidth=4, solid_capstyle='round', zorder=6)
+            self.obstacle_lines.append(line)
+
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         
         plt.pause(0.01)
-    
