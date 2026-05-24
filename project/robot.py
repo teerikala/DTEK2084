@@ -16,10 +16,18 @@ class Robot():
         self.local_measurement = None
         self.prev_local_measurement = None
         self.consensus_state = None
+        self.has_los = False # Whether this robot had valid LOS this tick
        
     def get_sensor_reading(self):
         """Read raw hardware sensors and make a local, noisy guess."""
         true_target = self.env.target_pos[0]
+
+        # Skip reading entirely if an obstacle blocks the signal path
+        if self.env.los_blocked(true_target, self.pos):
+            self.has_los = False # No valid reading this tick; coast on consensus
+            return
+
+        self.has_los = True
         
         # Get raw sensor data
         rx_power = signal_strenght(true_target, self.pos)
@@ -37,8 +45,8 @@ class Robot():
         est_dist = 10 ** ((path_loss - 35) / 20.0)
         
         # Each robot has uniquely "broken" hardware to simulate Distributed Estimation importance
-        bias_x = [40.0, -40.0, 0.0][self.robot_id]
-        bias_y = [0.0, 40.0, -40.0][self.robot_id]
+        bias_x = [40.0, -40.0, 0.0, 30.0, -30.0, 10.0][self.robot_id]  # extended to 6 robots
+        bias_y = [0.0, 40.0, -40.0, -30.0, 10.0, -20.0][self.robot_id]  # extended to 6 robots
         
         # Debugging: Prove the bias is loaded on the first tick!
         if self.env.clock == 1 and self.robot_id == 0:
@@ -76,8 +84,12 @@ class Robot():
                     # Compare states
                     sum_diff += (peer.consensus_state - self.consensus_state)
                 
-        # Dynamic Consensus Formula:
-        pull_to_sensor = self.local_measurement - self.consensus_state
+        # Only pull toward local sensor if we had a valid reading this tick;
+        # otherwise coast on peer consensus alone so stale data doesn't corrupt the estimate
+        if self.has_los and self.local_measurement is not None:
+            pull_to_sensor = self.local_measurement - self.consensus_state
+        else:
+            pull_to_sensor = np.array([0.0, 0.0])
         
         self.next_consensus_state = self.consensus_state + (consensus_gain * sum_diff) + (sensor_gain * pull_to_sensor)
         
@@ -103,7 +115,9 @@ class Robot():
             
         # Distance-Based Formation Control
         v_formation = np.array([0.0, 0.0])
-        desired_peer_dist = self.min_target_dist * 1.732 # An equilateral triangle inside a circle has side lenght of exactly the radius of the circle, R * sqrt(3) and sqrt(3) = 1,732
+        # For N robots in a regular polygon inscribed in a circle of radius R, side = 2R * sin(π/N)
+        n_robots = len(self.env.robot_pos)
+        desired_peer_dist = 2 * self.min_target_dist * np.sin(np.pi / n_robots)
         for i, other_pos in enumerate(self.env.robot_pos):
             if i == self.robot_id:
                 continue
@@ -126,7 +140,7 @@ class Robot():
         
         # Sync to environment
         self.env.robot_pos[self.robot_id] = tuple(self.pos)
-        
+
 
         #self.received_robots = []
         #self.received_targets = []

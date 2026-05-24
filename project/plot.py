@@ -3,21 +3,29 @@ import matplotlib.pyplot as plt
 from env import Env
 from robot import Robot
 
+def make_robot_positions(n, radius=150.0, y_offset=-150.0):
+    """Space N robots evenly along the bottom of the arena."""
+    if n == 1:
+        return [(0.0, y_offset)]
+    return [(radius * np.cos(np.pi + np.pi * i / (n - 1)), y_offset) for i in range(n)]
+
 def run_test(wifi_on, steps=300):
-    robot_pos = [(-150.0, -150.0), (150.0, -150.0), (0.0, -150.0)]
+    N_ROBOTS = 2  # Change to 3–6
+
+    robot_pos = make_robot_positions(N_ROBOTS)
     target_pos = [(0.0, 150.0)]
+    obstacles = [
+        ((60, 80), (60, 150)), # vertical wall right of target; clears all start positions
+        ((-50, 89), (-50, 150)),  
+    ]
     
     # Initialize the environment
-    env = Env(robot_pos, target_pos)
+    env = Env(robot_pos, target_pos, obstacles)
     
     # Close the live visualizer window so the test runs instantly
     plt.close(env.fig)
 
-    robots = [
-        Robot(robot_pos[0], env, 0),
-        Robot(robot_pos[1], env, 1),
-        Robot(robot_pos[2], env, 2)
-    ]
+    robots = [Robot(robot_pos[i], env, i) for i in range(N_ROBOTS)]
 
     error_history = []
 
