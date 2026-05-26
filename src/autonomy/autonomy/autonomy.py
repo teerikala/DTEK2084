@@ -17,15 +17,12 @@ class Autonomy(Node):
         self.subscription = self.create_subscription(Image, '/image_raw', self.image_callback, custom_qos)
         self.bridge = CvBridge()
         
-        # Service client for discrete commands (Takeoff, Land)
         self.tello_client = self.create_client(TelloAction, '/tello_action')
         
-        # Publisher for /cmd_vel
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
         self.x_err = 0
         self.y_err = 0
-        #self.n = 0
         self.good_frames = 0
         self.speed = 0.0
         self.frames_going_forward = 0
@@ -70,7 +67,6 @@ class Autonomy(Node):
         except Exception as e:
             self.get_logger().error(f"Service call failed: {e}")
         finally:
-            # Unlock the drone state once the command finishes
             self.command_in_progress = False
 
     def image_callback(self, msg):
@@ -79,8 +75,6 @@ class Autonomy(Node):
            return
 
         image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8') 
-        #cv2.imwrite(f"frame_{self.n}.png", image)
-        #self.n += 1
         
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, rejected = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
@@ -100,12 +94,12 @@ class Autonomy(Node):
 
             hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-            #lower_green = np.array([37, 47, 47])
+        	#lower_green = np.array([37, 47, 47])
             lower_green = np.array([35, 45, 40])
-            
+        	#upper_green = np.array([90, 255, 255])
             upper_green = np.array([90, 255, 255])
             
-            #upper_green = np.array([90, 255, 255])
+
 
             mask = cv2.inRange(hsv, lower_green, upper_green)
             
@@ -127,7 +121,6 @@ class Autonomy(Node):
             
             if red_count > 4000 or self.gate_counter == 4:
                 self.get_logger().info("Beginning landing sequence...")
-                #self.cmd_vel_pub.publish(Twist())
                 self.tello_service_call('land')
                 self.command_in_progress = True
                 return
@@ -196,9 +189,7 @@ class Autonomy(Node):
         error_y = cy - frame_cy
 	
         cv2.circle(output, (cx, cy), 10, (0, 0, 255), -1)
-        #cv2.drawContours(output, [box], 0, (0, 255, 0), 2)
         resized = output
-        #resized = cv2.resize(output, None, fx=0.2, fy=0.2) 
         cv2.imshow("Rectangle", resized)
         cv2.waitKey(1)
         
@@ -218,16 +209,6 @@ class Autonomy(Node):
                 self.prev_cy = None
                 self.gate_counter += 1
                 return
-            
-            
-        #self.x_err = error_x
-        #self.y_err = error_y
-        
-        
-        #if abs(error_x) <= 20 and abs(error_y) <= 20:
-            #self.cmd_vel_pub.publish(Twist())
-            #self.good_frames += 1
-            #self.get_logger().info(f"{self.good_frames}/20 good frames")
         else:
             self.good_frames = 0
             velocity_h = 0
@@ -260,10 +241,6 @@ class Autonomy(Node):
             twist_msg.linear.z = velocity_v
             
             self.cmd_vel_pub.publish(twist_msg)
-            
-            #self.get_logger().info(f"Width: {current_width} / {TARGET_WIDTH} | vel_h (fwd): {velocity_h:.2f}")
-            
-            #self.get_logger().info(f"Tracking -> vel_r: {velocity_r:.2f}, vel_v: {velocity_v:.2f}")
             
 def main(args=None):
     rclpy.init(args=args)
